@@ -1,0 +1,58 @@
+varnishtest "proxy-wasm-cache-key-normalizer: normalize URL, Host, and cache key hint via vmod-wasm"
+
+server s1 {
+    rxreq
+    expect req.url == "/products/item?a=1&b=2"
+    expect req.http.Host == "example.test"
+    expect req.http.X-Cache-Key-Normalized == "true"
+    expect req.http.X-Cache-Key == "GET example.test/products/item?a=1&b=2"
+    txresp -status 200 -body "normalized noisy request"
+} -start
+
+varnish v1 -arg "-p thread_pool_stack=262144" -vcl+backend {
+    import wasm from "${vmod_wasm}";
+
+    sub vcl_init {
+        wasm.load("cachekey", "${cache_key_filter}");
+        wasm.set_epoch_deadline(100);
+        wasm.set_memory_limit(8388608);
+    }
+
+    sub vcl_recv {
+        set req.http.X-Wasm-Action =
+            wasm.proxy_wasm_on_request_configured("cachekey", "",
+                {"{"mode":"rewrite","remove_query_prefixes":["utm_"],"remove_query_params":["gclid","fbclid"],"sort_query":true,"trailing_slash":"strip" }"});
+
+        if (req.http.X-Wasm-Action != "0") {
+            return (synth(500, "Cache key normalizer failed"));
+        }
+    }
+
+    sub vcl_deliver {
+        set resp.http.X-Wasm-Action = req.http.X-Wasm-Action;
+        set resp.http.X-Cache-Key-Normalized = req.http.X-Cache-Key-Normalized;
+        set resp.http.X-Cache-Key = req.http.X-Cache-Key;
+    }
+} -start
+
+client c1 {
+    txreq -url "/products//category/../item/?utm_source=ad&b=2&a=1&gclid=x" \
+        -hdr "Host: EXAMPLE.TEST:80"
+    rxresp
+    expect resp.status == 200
+    expect resp.body == "normalized noisy request"
+    expect resp.http.X-Wasm-Action == "0"
+    expect resp.http.X-Cache-Key-Normalized == "true"
+    expect resp.http.X-Cache-Key == "GET example.test/products/item?a=1&b=2"
+} -run
+
+client c2 {
+    txreq -url "/products/item?a=1&b=2" \
+        -hdr "Host: example.test"
+    rxresp
+    expect resp.status == 200
+    expect resp.body == "normalized noisy request"
+    expect resp.http.X-Wasm-Action == "0"
+    expect resp.http.X-Cache-Key-Normalized == "false"
+    expect resp.http.X-Cache-Key == "GET example.test/products/item?a=1&b=2"
+} -run

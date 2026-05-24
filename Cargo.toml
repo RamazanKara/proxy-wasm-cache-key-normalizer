@@ -1,0 +1,26 @@
+[package]
+name = "proxy-wasm-cache-key-normalizer"
+version = "0.1.0"
+edition = "2021"
+license = "BSD-2-Clause"
+description = "Proxy-Wasm cache key normalizer for Varnish and vmod-wasm"
+repository = "https://github.com/RamazanKara/proxy-wasm-cache-key-normalizer"
+readme = "README.md"
+keywords = ["proxy-wasm", "varnish", "cache", "normalization", "edge"]
+categories = ["wasm", "web-programming"]
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+proxy-wasm = "0.2.5"
+serde = { version = "1", features = ["derive"] }
+serde-json-wasm = "1"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "z"
+panic = "abort"
+strip = true
